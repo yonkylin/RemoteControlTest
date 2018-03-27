@@ -18,7 +18,7 @@ public class DraggableInfo implements Serializable {
     private int pic;
     private int id;
 
-    public DraggableInfo(int type, String text, int pic, int id) {
+    public DraggableInfo( String text, int pic, int id,int type) {
         this.type = type;
         this.text = text;
         this.pic = pic;

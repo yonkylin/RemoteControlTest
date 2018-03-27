@@ -3,6 +3,7 @@ package yonky.remotecontroltest.widget;
 import android.content.ClipDescription;
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.DashPathEffect;
@@ -20,12 +21,14 @@ import android.view.DragEvent;
 import android.view.Gravity;
 import android.widget.FrameLayout;
 import android.view.View;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import java.util.ArrayList;
 import java.util.List;
 
 import yonky.remotecontroltest.DraggableInfo;
+import yonky.remotecontroltest.Tools;
 
 import static yonky.remotecontroltest.Tools.ONE_BY_ONE_PIC;
 import static yonky.remotecontroltest.Tools.ONE_BY_ONE_TEXT;
@@ -276,7 +279,6 @@ public class RemoteControlView extends FrameLayout implements View.OnDragListene
         }
     }
 
-
     @Override
     public boolean onDrag(View v, DragEvent event) {
         final int action = event.getAction();
@@ -290,24 +292,269 @@ public class RemoteControlView extends FrameLayout implements View.OnDragListene
                 }
                 break;
             case DragEvent.ACTION_DRAG_ENTERED:
-                Log.e(TAG, "进入区域");
+                Log.e(TAG, "进入");
+                mTextView.setVisibility(GONE);
+                isOut = false;
                 break;
             case DragEvent.ACTION_DRAG_EXITED:
-                Log.e(TAG, "移出区域");
+                Log.e(TAG, "移出");
+                if (frameLayout.getChildCount() == 0){
+                    mTextView.setVisibility(VISIBLE);
+                }
+                isOut = true;
+                shadowRect = null;
+                invalidate();
                 break;
             case DragEvent.ACTION_DRAG_ENDED:
                 Log.e(TAG, "停止拖动");
+                if (dragView != null && isOut){
+                    mRectList.remove(dragRect);
+                    frameLayout.removeView(dragView);
+                }
+                if (frameLayout.getChildCount() == 0){
+                    mTextView.setVisibility(VISIBLE);
+                }
+                dragView = null;
+                dragRect = null;
+                stopDrag();
                 break;
             case DragEvent.ACTION_DRAG_LOCATION:
-                Log.e(TAG, "停留在区域中");
+                // 停留
+                if (dragView != null){
+                    info = (DraggableInfo) dragView.getTag();
+                }
+                if (info == null){
+                    break;
+                }
+                compute(info.getType(), mRect, event);
+                adjust(info.getType(), mRect, event);
+                if (isEffectiveArea(mRect) && !isOverlap(mRect)){
+                    shadowRect = mRect;
+                }else {
+                    shadowRect = null;
+                }
+                try {
+                    Thread.sleep(33);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                invalidate();
                 break;
             case DragEvent.ACTION_DROP:
-                Log.e(TAG, "释放拖动View");
+                Log.e(TAG, "释放拖动");
+                if (dragView == null){
+                    final DraggableInfo data = (DraggableInfo) event.getClipData().getItemAt(0).getIntent().getSerializableExtra("data");
+                    if (data != null){
+                        int size = mPhoneContentWidth / WIDTH_COUNT - dp2px(10);
+                        int padding = size / 4;
+
+                        final ImageView imageView;
+
+                        if (data.getType() == ONE_BY_TWO_PIC){
+                            imageView = new ImageView(getContext());
+                            imageView.setImageResource(data.getPic());
+                        }else {
+                            imageView = new DraggableButton(getContext());
+                            imageView.setPadding(padding, padding, padding, padding);
+                            if (data.getType() == ONE_BY_ONE_TEXT){
+                                ((DraggableButton)imageView).setText(data.getText());
+                            }else {
+                                imageView.setImageResource(data.getPic());
+                            }
+                        }
+                        imageView.setTag(data);
+                        final Rect rect = new Rect();
+                        imageView.setOnLongClickListener(new OnLongClickListener() {
+                            @Override
+                            public boolean onLongClick(View v) {
+                                Tools.startDrag(imageView);
+                                dragView = imageView;
+                                dragRect = rect;
+                                setDragInfo(data);
+                                imageView.setVisibility(GONE);
+                                return false;
+                            }
+                        });
+
+                        compute(data.getType(), rect, event);
+                        adjust(data.getType(), rect, event);
+
+                        if (isEffectiveArea(rect) && !isOverlap(rect)){
+                            mRectList.add(rect);
+                            frameLayout.addView(imageView);
+                        }
+                    }
+                }else {
+                    DraggableInfo data = (DraggableInfo) dragView.getTag();
+                    Rect rect = dragRect;
+                    compute(data.getType(), rect, event);
+                    adjust(data.getType(), rect, event);
+
+                    if (isEffectiveArea(rect) && !isOverlap(rect)){
+                        dragView.setVisibility(VISIBLE);
+                    }else {
+                        mRectList.remove(dragRect);
+                        frameLayout.removeView(dragView);
+                    }
+                    dragView = null;
+                    dragRect = null;
+                }
+                stopDrag();
                 break;
             default:
                 return false;
         }
         return true;
+    }
+
+    private void stopDrag(){
+        shadowRect = null;
+        info = null;
+        invalidate();
+    }
+
+    /**
+     * 是否在有效区域
+     */
+    private boolean isEffectiveArea(Rect rect){
+        return rect.left >= 0 && rect.top >= 0 && rect.right >= 0 && rect.bottom >= 0 &&
+                rect.right <= frameLayout.getWidth() && rect.bottom <= frameLayout.getHeight();
+    }
+
+//    计算控件位置
+    private void compute(int type ,Rect rect,DragEvent event){
+        int size = mPhoneContentWidth / WIDTH_COUNT-dp2px(10);
+        int x = (int)event.getX();
+        int y = (int)event.getY();
+
+        if(type==ONE_BY_ONE_PIC || type ==ONE_BY_ONE_TEXT){
+            //1*1方格
+            rect.left = x-size/2;
+            rect.top =y-size/2;
+            rect.right= x+size/2;
+            rect.bottom= y+size/2;
+        }else if(type==THREE_BY_THREE_PIC){
+            //3*3方格
+            rect.left = x-size*3/2;
+            rect.top = y-size*3/2;
+            rect.right=x-size*3/2;
+            rect.bottom =y+size*3/2;
+        }else if(type ==ONE_BY_TWO_PIC){
+//            1*2方格
+            rect.left = x-size/2;
+            rect.top = y-size/2;
+            rect.right = x+size/2;
+            rect.bottom = y+size/2;
+        }
+    }
+
+//    调整控件位置
+    private void adjust(int type,Rect rect , DragEvent event){
+        //最小单元格宽高
+        int size = mPhoneContentWidth/WIDTH_COUNT/2;
+//        手机屏幕间距
+        int padding  = dp2px(5);
+        //1*1方格高
+        int width = size*2-dp2px(10);
+
+        int offsetX = (rect.left-padding)%size;
+        if(offsetX<size/2){
+            rect.left = rect.left+padding-offsetX;
+
+        }else{
+            rect.left = rect.left+padding-offsetX+size;
+        }
+
+        int offsetY = (rect.top-padding)%size;
+        if(offsetY<size/2){
+            rect.top = rect.top+padding-offsetY;
+
+        }else{
+            rect.top=rect.top+padding+size-offsetY;
+        }
+
+        if(type ==ONE_BY_ONE_TEXT || type ==ONE_BY_ONE_PIC){
+            rect.right =rect.left+width;
+            rect.bottom = rect.top+width;
+        }else if(type ==ONE_BY_TWO_PIC){
+            rect.top = rect.top+padding;
+            rect.bottom = rect.top+width*2;
+        }else if(type ==THREE_BY_THREE_PIC){
+            rect.top = rect.top+padding*2;
+            rect.left=rect.left+padding*2;
+            rect.right = rect.left+width*3;
+            rect.bottom = rect.top+width*3;
+        }
+
+        //超出部分修正
+        if(rect.right>frameLayout.getWidth() || rect.bottom>frameLayout.getHeight()){
+            int currentX = (int)event.getX();
+            int currentY = (int)event.getY();
+
+            int centerX = frameLayout.getWidth()/2;
+            int centerY = frameLayout.getHeight()/2;
+
+            if (currentX <= centerX && currentY <= centerY) {
+                //左上角区域
+
+            }else if(currentX>=centerX &&currentY<=centerY){
+                //右上角区域
+                rect.left = rect.left-size;
+                rect.right = rect.right-size;
+            }else if(currentX<=centerX &&currentY>=centerY){
+                //左下角区域
+                rect.top = rect.top-size;
+                rect.bottom = rect.bottom-size;
+            }else if(currentX>=centerX && currentY>=centerY){
+                //右下角区域
+                if(rect.right>frameLayout.getWidth()){
+                    rect.left = rect.left-size;
+                    rect.right=rect.right-size;
+                }
+                if(rect.bottom>frameLayout.getHeight()){
+                    rect.top=rect.top-size;
+                    rect.bottom=rect.bottom-size;
+                }
+            }
+        }
+    }
+
+    //判断是否重叠
+    private boolean isOverlap(Rect rect){
+        for(Rect mRect :mRectList){
+            if(!isEqual(mRect)){
+                if(isRectOverlap(mRect,rect)){
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+//    判断两Rect是否重叠
+    private boolean isRectOverlap(Rect oldRect,Rect newRect){
+        return (oldRect.right>newRect.left &&
+                newRect.right>oldRect.left &&
+                oldRect.bottom>newRect.top &&
+                newRect.bottom>oldRect.top);
+    }
+
+//    判断拖拽的Rect是否相等
+    private boolean isEqual(Rect rect){
+        if(dragRect ==null){
+            return false;
+        }
+        return (rect.left ==dragRect.left &&
+                rect.right==dragRect.right &&
+                rect.top==dragRect.top &&
+                rect.bottom==dragRect.bottom);
+    }
+
+//    设置拖拽按钮信息
+    public void setDragInfo(DraggableInfo info){
+        this.info = info;
+        if(info.getType()!=ONE_BY_ONE_TEXT){
+            shadowBitmap = BitmapFactory.decodeResource(getResources(),info.getPic());
+        }
     }
 
 
